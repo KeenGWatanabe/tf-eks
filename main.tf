@@ -2,7 +2,7 @@ module "eks" {
   source          = "terraform-aws-modules/eks/aws"
   version         = "20.36.0" # Replace with the latest version available
   cluster_name    = "${local.prefix}-eks-cluster"
-  cluster_version = "1.23" # Update as needed
+  cluster_version = "1.32" # Update as needed
   vpc_id          = aws_vpc.main.id
   subnet_ids      = aws_subnet.public[*].id # Dynamically include public subnets
 
