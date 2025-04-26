@@ -104,6 +104,7 @@ resource "aws_iam_role" "eks_role" {
       }
     ]
   })
+  force_detach_policies = true
 }
 
 
