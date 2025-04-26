@@ -9,7 +9,7 @@ terraform {
   }
 }
 provider "aws" {
-  region = "us-east-1" # Change if needed
+  region = var.region # Change if needed
 }
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
@@ -21,52 +21,37 @@ locals {
   prefix = "myapp" # Change to your preferred prefix
  }
 
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "5.0.0"
 
+  name = "${local.prefix}-vpc"
+  cidr = "10.0.0.0/16"
+
+  azs             = slice(data.aws_availability_zones.available.names, 0, 2) # Use 2 AZs
+  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24"]
+  private_subnets = ["10.0.101.0/24", "10.0.102.0/24"] # For internal EKS nodes
+
+  enable_nat_gateway   = true
+  single_nat_gateway   = true # Cost optimization
+  enable_dns_hostnames = true # Required for EKS
+
+  # Critical for EKS
+  public_subnet_tags = {
+    "kubernetes.io/role/elb" = "1"
+  }
+
+  private_subnet_tags = {
+    "kubernetes.io/role/internal-elb" = "1"
+  }
+
+  tags = {
+    Environment = "Production"
+    Project     = local.prefix
+  }
+}
 
 # --- VPC & Networking ---
-resource "aws_vpc" "main" {
-  cidr_block = "10.0.0.0/16"
-  tags = {
-    Name = "${local.prefix}-vpc"
-  }
-}
-
-resource "aws_subnet" "public" {
-  count             = 2
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.${count.index}.0/24"
-  availability_zone = element(data.aws_availability_zones.available.names, count.index)
-
-  map_public_ip_on_launch = true  # ✅ Enable auto-assignment of public IPs
-
-  tags = {
-    Name = "${local.prefix}-public-subnet-${count.index}"
-  }
-}
-
-resource "aws_internet_gateway" "gw" {
-  vpc_id = aws_vpc.main.id
-  tags = {
-    Name = "${local.prefix}-igw"
-  }
-}
-
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.gw.id
-  }
-  tags = {
-    Name = "${local.prefix}-public-rt"
-  }
-}
-
-resource "aws_route_table_association" "public" {
-  count          = 2
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}
 
 # --- Security Group for EKS  ---
 resource "aws_security_group" "eks" {
@@ -78,7 +63,7 @@ resource "aws_security_group" "eks" {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Restrict in production!
+    cidr_blocks = ["119.74.93.41/32"] # Restrict in production!
   }
 
   egress {
@@ -89,80 +74,24 @@ resource "aws_security_group" "eks" {
   }
 }
 
+# Remove all the manual IAM role/policy resources - let the EKS module handle these
 # --- IAM role ---
-resource "aws_iam_role" "eks_role" {
-  name = "${local.prefix}-eks-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "eks.amazonaws.com"
-        }
-      }
-    ]
-  })
-  force_detach_policies = true
+output "vpc_id" {
+  description = "VPC ID"
+  value       = module.vpc.vpc_id
 }
 
-
-
-# ---IAM trust policy---
-data "aws_iam_policy_document" "eks_assume_role_policy" {
-  statement {
-    effect = "Allow"
-    principals {
-      type        = "Service"
-      identifiers = ["eks.amazonaws.com"]
-    }
-    actions = ["sts:AssumeRole"]
-  } 
+output "private_subnets" {
+  description = "Private subnet IDs"
+  value       = module.vpc.private_subnets
 }
 
-# ---IAM permissions policy---
-data "aws_iam_policy_document" "eks_policy" {
-  statement {
-    effect    = "Allow"
-    actions   = [
-      "eks:DescribeCluster",
-      "eks:CreateCluster",
-      "eks:DeleteCluster",
-      "eks:ListClusters",
-      "ec2:DescribeInstances",
-      "iam:PassRole",
-      "autoscaling:DescribeAutoScalingGroups"
-    ]
-    resources = ["*"] # Adjust this for security best practices
-  }
+output "public_subnets" {
+  description = "Public subnet IDs"
+  value       = module.vpc.public_subnets
 }
 
-resource "aws_iam_policy" "eks_policy" {
-  name   = "eks-cluster-policy"
-  policy = data.aws_iam_policy_document.eks_policy.json
-}
-
-# Attach cluster policy permissions
-resource "aws_iam_role_policy_attachment" "eks_attach_policy" {
-  role       = aws_iam_role.eks_role.name
-  policy_arn = aws_iam_policy.eks_policy.arn
-}
-
-# Attach control plane permissions
-resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
-  role       = aws_iam_role.eks_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-}
-
-# Attach service policy for EKS
-resource "aws_iam_role_policy_attachment" "eks_service_policy" {
-  role       = aws_iam_role.eks_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
-}
-
-# Attach worker node permissions
-resource "aws_iam_role_policy_attachment" "eks_node_policy" {
-  role       = aws_iam_role.eks_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+output "cluster_endpoint" {
+  description = "EKS control plane endpoint"
+  value       = module.eks.cluster_endpoint
 }
