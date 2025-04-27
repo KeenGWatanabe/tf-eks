@@ -45,21 +45,23 @@ resource "kubernetes_config_map" "aws_auth" {
     name      = "aws-auth"
     namespace = "kube-system"
   }
-
   data = {
-    mapRoles = <<YAML- rolearn: ${module.eks.eks_managed_node_groups["eks-node-group"].iam_role_arn}
-  username: system:node:{{EC2PrivateDNSName}}
-  groups:
-    - system:bootstrappers
-    - system:nodes
-YAML
-
-    mapUsers = <<YAML
+    mapRoles = jsonencode([
+      {
+        "rolearn" : module.eks.eks_managed_node_groups["eks-node-group"].iam_role_arn,
+        "username" : "system:node:{{EC2PrivateDNSName}}",
+        "groups" : [
+          "system:bootstrappers",
+          "system:nodes"
+        ]
+         mapUsers = <<YAML
 - userarn: arn:aws:iam::255945442255:role/roger_ce9
   username: roger_ce9
   groups:
     - system:masters
 YAML
+      }
+    ])
   }
 }
 
