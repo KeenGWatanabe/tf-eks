@@ -35,20 +35,19 @@ locals {
   aws_account_id = data.aws_caller_identity.current.account_id
 }
 
+
 resource "kubernetes_config_map" "aws_auth" {
   depends_on = [
     module.eks,
     module.eks.eks_managed_node_groups  # Wait for node groups
   ]
-
   metadata {
     name      = "aws-auth"
     namespace = "kube-system"
   }
 
   data = {
-    mapRoles = <<YAML
-- rolearn: ${module.eks.eks_managed_node_groups["eks-node-group"].iam_role_arn}
+    mapRoles = <<YAML- rolearn: ${module.eks.eks_managed_node_groups["eks-node-group"].iam_role_arn}
   username: system:node:{{EC2PrivateDNSName}}
   groups:
     - system:bootstrappers
@@ -56,8 +55,8 @@ resource "kubernetes_config_map" "aws_auth" {
 YAML
 
     mapUsers = <<YAML
-- userarn: arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/roger_ce9
-  username: admin
+- userarn: arn:aws:iam::255945442255:user/roger_ce9
+  username: roger_ce9
   groups:
     - system:masters
 YAML
