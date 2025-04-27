@@ -55,7 +55,7 @@ resource "kubernetes_config_map" "aws_auth" {
 YAML
 
     mapUsers = <<YAML
-- userarn: arn:aws:iam::255945442255:user/roger_ce9
+- userarn: arn:aws:iam::255945442255:role/roger_ce9
   username: roger_ce9
   groups:
     - system:masters
