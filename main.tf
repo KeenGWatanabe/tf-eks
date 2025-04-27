@@ -1,7 +1,7 @@
 module "eks" {
   source          = "terraform-aws-modules/eks/aws"
   version         = "20.36.0" # Replace with the latest version available
-  cluster_name    = "${local.prefix}-eks-cluster"
+  cluster_name    = "myapp-eks-cluster"
   cluster_version = "1.32" # Update as needed
   cluster_endpoint_public_access = true
   vpc_id          = module.vpc.vpc_id
@@ -11,11 +11,16 @@ module "eks" {
   
    eks_managed_node_groups = {
     eks-node-group = {
-      desired_capacity = 2
-      max_capacity     = 3
       min_capacity     = 1
+      max_capacity     = 3
+      desired_capacity = 2
       instance_types   = ["t3.medium"]
       capacity_type    = "ON_DEMAND" 
+
+      # Required for aws-auth ConfigMap
+      iam_role_additional_policies = {
+        AmazonEBSCSIDriverPolicy = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+      }
     }
   }
 
@@ -31,7 +36,11 @@ locals {
 }
 
 resource "kubernetes_config_map" "aws_auth" {
-  depends_on = [module.eks]
+  depends_on = [
+    module.eks,
+    module.eks.eks_managed_node_groups  # Wait for node groups
+  ]
+
   metadata {
     name      = "aws-auth"
     namespace = "kube-system"
@@ -39,19 +48,35 @@ resource "kubernetes_config_map" "aws_auth" {
 
   data = {
     mapRoles = <<YAML
-- rolearn: ${aws_iam_role.eks_role.arn}
+- rolearn: ${module.eks.eks_managed_node_groups["eks-node-group"].iam_role_arn}
   username: system:node:{{EC2PrivateDNSName}}
   groups:
     - system:bootstrappers
     - system:nodes
 YAML
+
     mapUsers = <<YAML
-- userarn: arn:aws:iam::${local.aws_account_id}:user/roger_ce9  # ← Replace with your IAM username
+- userarn: arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/roger_ce9
   username: admin
   groups:
     - system:masters
 YAML
   }
+}
 
-  
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args = [
+      "eks",
+      "get-token",
+      "--cluster-name",
+      module.eks.cluster_name,
+      "--region",
+      var.region
+    ]
+  }
 }

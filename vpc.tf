@@ -56,7 +56,7 @@ module "vpc" {
 # --- Security Group for EKS  ---
 resource "aws_security_group" "eks" {
   name        = "${local.prefix}-eks-sg"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = module.vpc.vpc_id
   description = "Allow inbound HTTP traffic"
 
   ingress {
